@@ -1,0 +1,27 @@
+{
+  "name": "Claude Code Sandbox",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code"
+      ],
+      "settings": {
+        "claudeCode.disableLoginPrompt": true,
+        "claudeCode.allowDangerouslySkipPermissions": true
+      }
+    }
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.gitconfig,target=/home/developer/.gitconfig,type=bind,readonly",
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
+  "containerEnv": {
+    "AWS_DEFAULT_REGION": "eu-central-1",
+    "AWS_REGION": "eu-central-1"
+  },
+  "remoteUser": "developer",
+  "postCreateCommand": "mkdir -p ~/.claude && cp $PWD/.devcontainer/claude-settings.json ~/.claude/settings.json && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\"$HOME/.local/bin:$PATH\" && claude mcp add --transport sse atlassian https://mcp.atlassian.com/v1/mcp && echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.bashrc && echo 'alias clauded=\"claude --dangerously-skip-permissions\"' >> ~/.bashrc && echo '✅ Claude Code Sandbox ready. Run: export AWS_ACCESS_KEY_ID=... && export AWS_SECRET_ACCESS_KEY=... then: clauded'"
+}

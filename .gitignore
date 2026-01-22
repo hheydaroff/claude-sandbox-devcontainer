@@ -1,0 +1,34 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local testing
+test/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Credentials
+.aws/
+*.pem
+*.key
+credentials
+.credentials
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
