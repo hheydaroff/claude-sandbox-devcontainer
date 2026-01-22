@@ -10,52 +10,182 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m'
 
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}  Claude Code Sandbox DevContainer Installer${NC}"
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-
+# Directories
+CONFIG_DIR="$HOME/.config/claude-sandbox"
+CONFIG_FILE="$CONFIG_DIR/config"
 TEMPLATE_DIR="$HOME/.config/devcontainer-templates/claude-sandbox"
 BIN_DIR="$HOME/.local/bin"
 REPO_URL="https://raw.githubusercontent.com/hheydaroff/claude-sandbox-devcontainer/main"
 
-# Create directories
-echo -e "${GREEN}Creating directories...${NC}"
-mkdir -p "$TEMPLATE_DIR"
-mkdir -p "$BIN_DIR"
-
-# Download template files
-echo -e "${GREEN}Downloading template files...${NC}"
-curl -fsSL "$REPO_URL/.devcontainer/devcontainer.json" -o "$TEMPLATE_DIR/devcontainer.json"
-curl -fsSL "$REPO_URL/.devcontainer/Dockerfile" -o "$TEMPLATE_DIR/Dockerfile"
-curl -fsSL "$REPO_URL/.devcontainer/claude-settings.json" -o "$TEMPLATE_DIR/claude-settings.json"
-
-# Download CLI tool
-echo -e "${GREEN}Installing CLI tool...${NC}"
-curl -fsSL "$REPO_URL/claude-sandbox" -o "$BIN_DIR/claude-sandbox"
-chmod +x "$BIN_DIR/claude-sandbox"
-
-# Check if ~/.local/bin is in PATH
-if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+# Print banner
+print_banner() {
+  echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e "${BLUE}  Claude Code Sandbox DevContainer Installer${NC}"
+  echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
   echo ""
-  echo -e "${YELLOW}Note: $BIN_DIR is not in your PATH.${NC}"
-  echo -e "${YELLOW}Add this to your shell config (~/.zshrc or ~/.bashrc):${NC}"
-  echo ""
-  echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
-  echo ""
-fi
+}
 
-echo ""
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  ✅ Installation complete!${NC}"
-echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-echo -e "Usage:"
-echo -e "  ${BLUE}cd /path/to/your/project${NC}"
-echo -e "  ${BLUE}claude-sandbox${NC}"
-echo ""
-echo -e "Then open in VS Code and:"
-echo -e "  Cmd+Shift+P → 'Dev Containers: Reopen in Container'"
-echo ""
+# Prompt user to select from numbered options
+# Usage: prompt_choice "Question" "option1" "option2" "option3"
+# Returns: selected option number (1-based) in $REPLY
+prompt_choice() {
+  local question="$1"
+  shift
+  local options=("$@")
+
+  echo -e "${BOLD}$question${NC}"
+  echo ""
+
+  local i=1
+  for opt in "${options[@]}"; do
+    echo -e "  ${CYAN}[$i]${NC} $opt"
+    ((i++))
+  done
+
+  echo ""
+  while true; do
+    read -p "Choice [1-${#options[@]}]: " choice
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#options[@]}" ]; then
+      REPLY=$choice
+      return 0
+    fi
+    echo -e "${RED}Invalid choice. Please enter a number between 1 and ${#options[@]}.${NC}"
+  done
+}
+
+# Detect Docker availability
+detect_docker() {
+  if [ -S "/var/run/docker.sock" ]; then
+    echo "true"
+  else
+    echo "false"
+  fi
+}
+
+# Main installation
+main() {
+  print_banner
+
+  # Create directories
+  mkdir -p "$CONFIG_DIR"
+  mkdir -p "$TEMPLATE_DIR"
+  mkdir -p "$BIN_DIR"
+
+  # === Auth Method Selection ===
+  echo -e "${GREEN}Step 1: Authentication Method${NC}"
+  echo ""
+  prompt_choice "How will you authenticate with Claude?" \
+    "Claude Pro/Max subscription (claude login)" \
+    "Anthropic API key (ANTHROPIC_API_KEY)" \
+    "AWS Bedrock (AWS credentials)"
+
+  case $REPLY in
+    1) PROVIDER="subscription" ;;
+    2) PROVIDER="api-key" ;;
+    3) PROVIDER="bedrock" ;;
+  esac
+
+  echo ""
+
+  # === Region Selection (Bedrock only) ===
+  AWS_REGION="us-east-1"
+  if [ "$PROVIDER" = "bedrock" ]; then
+    echo -e "${GREEN}Step 2: AWS Region${NC}"
+    echo ""
+    prompt_choice "Select your AWS Bedrock region:" \
+      "us-east-1 (N. Virginia)" \
+      "us-west-2 (Oregon)" \
+      "eu-central-1 (Frankfurt)" \
+      "eu-west-1 (Ireland)" \
+      "eu-west-3 (Paris)" \
+      "ap-northeast-1 (Tokyo)" \
+      "ap-southeast-1 (Singapore)" \
+      "ap-southeast-2 (Sydney)"
+
+    case $REPLY in
+      1) AWS_REGION="us-east-1" ;;
+      2) AWS_REGION="us-west-2" ;;
+      3) AWS_REGION="eu-central-1" ;;
+      4) AWS_REGION="eu-west-1" ;;
+      5) AWS_REGION="eu-west-3" ;;
+      6) AWS_REGION="ap-northeast-1" ;;
+      7) AWS_REGION="ap-southeast-1" ;;
+      8) AWS_REGION="ap-southeast-2" ;;
+    esac
+
+    echo ""
+  fi
+
+  # === Docker Detection ===
+  DOCKER_ENABLED=$(detect_docker)
+  if [ "$DOCKER_ENABLED" = "true" ]; then
+    echo -e "${GREEN}Docker detected${NC} - Docker-in-Docker will be enabled"
+  else
+    echo -e "${YELLOW}Docker not detected${NC} - Docker-in-Docker will be disabled"
+  fi
+  echo ""
+
+  # === Save Configuration ===
+  echo -e "${GREEN}Saving configuration...${NC}"
+  cat > "$CONFIG_FILE" << EOF
+# Claude Sandbox Configuration
+# Generated by install.sh
+
+CLAUDE_PROVIDER=$PROVIDER
+AWS_REGION=$AWS_REGION
+DOCKER_ENABLED=$DOCKER_ENABLED
+EOF
+
+  echo "  Config saved to: $CONFIG_FILE"
+  echo ""
+
+  # === Download Files ===
+  echo -e "${GREEN}Downloading files...${NC}"
+
+  # Download Dockerfile (always needed)
+  curl -fsSL "$REPO_URL/.devcontainer/Dockerfile" -o "$TEMPLATE_DIR/Dockerfile"
+  echo "  Downloaded: Dockerfile"
+
+  # Download CLI tool
+  curl -fsSL "$REPO_URL/claude-sandbox" -o "$BIN_DIR/claude-sandbox"
+  chmod +x "$BIN_DIR/claude-sandbox"
+  echo "  Downloaded: claude-sandbox CLI"
+
+  echo ""
+
+  # === PATH Check ===
+  if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+    echo -e "${YELLOW}Note: $BIN_DIR is not in your PATH.${NC}"
+    echo -e "${YELLOW}Add this to your shell config (~/.zshrc or ~/.bashrc):${NC}"
+    echo ""
+    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo ""
+  fi
+
+  # === Success Message ===
+  echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo -e "${GREEN}  Installation complete!${NC}"
+  echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo ""
+  echo -e "Configuration:"
+  echo -e "  Provider: ${CYAN}$PROVIDER${NC}"
+  if [ "$PROVIDER" = "bedrock" ]; then
+    echo -e "  Region:   ${CYAN}$AWS_REGION${NC}"
+  fi
+  echo -e "  Docker:   ${CYAN}$DOCKER_ENABLED${NC}"
+  echo ""
+  echo -e "Usage:"
+  echo -e "  ${BLUE}cd /path/to/your/project${NC}"
+  echo -e "  ${BLUE}claude-sandbox${NC}"
+  echo ""
+  echo -e "CLI options:"
+  echo -e "  ${BLUE}claude-sandbox --help${NC}           Show all options"
+  echo -e "  ${BLUE}claude-sandbox --reconfigure${NC}    Change settings"
+  echo ""
+}
+
+main "$@"
