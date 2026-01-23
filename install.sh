@@ -91,10 +91,13 @@ main() {
 
   echo ""
 
+  # Dynamic step numbering
+  STEP=2
+
   # === Region Selection (Bedrock only) ===
   AWS_REGION="us-east-1"
   if [ "$PROVIDER" = "bedrock" ]; then
-    echo -e "${GREEN}Step 2: AWS Region${NC}"
+    echo -e "${GREEN}Step $STEP: AWS Region${NC}"
     echo ""
     prompt_choice "Select your AWS Bedrock region:" \
       "us-east-1 (N. Virginia)" \
@@ -118,15 +121,26 @@ main() {
     esac
 
     echo ""
+    ((STEP++))
   fi
 
-  # === Docker Detection ===
-  DOCKER_ENABLED=$(detect_docker)
-  if [ "$DOCKER_ENABLED" = "true" ]; then
-    echo -e "${GREEN}Docker detected${NC} - Docker-in-Docker will be enabled"
+  # === Docker-in-Docker Selection ===
+  DOCKER_DETECTED=$(detect_docker)
+  if [ "$DOCKER_DETECTED" = "true" ]; then
+    echo -e "${GREEN}Step $STEP: Docker-in-Docker${NC} ${CYAN}(Docker detected)${NC}"
   else
-    echo -e "${YELLOW}Docker not detected${NC} - Docker-in-Docker will be disabled"
+    echo -e "${GREEN}Step $STEP: Docker-in-Docker${NC} ${YELLOW}(Docker not detected)${NC}"
   fi
+  echo ""
+  prompt_choice "Enable Docker-in-Docker support?" \
+    "Yes - Enable Docker inside the container" \
+    "No - Disable Docker support"
+
+  case $REPLY in
+    1) DOCKER_ENABLED="true" ;;
+    2) DOCKER_ENABLED="false" ;;
+  esac
+
   echo ""
 
   # === Save Configuration ===
