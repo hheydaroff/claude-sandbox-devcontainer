@@ -164,16 +164,16 @@ generate_devcontainer() {
   case "$CLAUDE_PROVIDER" in
     subscription)
       env_json=""
-      post_create_cmd="mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\"\$HOME/.local/bin:\$PATH\" && echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && echo 'alias clauded=\"claude --dangerously-skip-permissions\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Run: claude login' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
+      post_create_cmd="mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Run: claude login' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
       ;;
     api-key)
       env_json=""
-      post_create_cmd="mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\"\$HOME/.local/bin:\$PATH\" && echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && echo 'alias clauded=\"claude --dangerously-skip-permissions\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Run: export ANTHROPIC_API_KEY=\"your-key\"' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
+      post_create_cmd="mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Run: export ANTHROPIC_API_KEY=your-key' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
       ;;
     bedrock)
       env_json="\"AWS_DEFAULT_REGION\": \"$AWS_REGION\",
     \"AWS_REGION\": \"$AWS_REGION\""
-      post_create_cmd="mkdir -p ~/.claude && cp \$PWD/.devcontainer/claude-settings.json ~/.claude/settings.json && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\"\$HOME/.local/bin:\$PATH\" && echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && echo 'alias clauded=\"claude --dangerously-skip-permissions\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Run: export AWS_ACCESS_KEY_ID=... && export AWS_SECRET_ACCESS_KEY=...' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
+      post_create_cmd="mkdir -p ~/.claude && cp \$PWD/.devcontainer/claude-settings.json ~/.claude/settings.json && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Run: export AWS_ACCESS_KEY_ID=... && export AWS_SECRET_ACCESS_KEY=...' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
       ;;
   esac
 
