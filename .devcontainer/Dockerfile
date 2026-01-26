@@ -3,7 +3,7 @@ FROM ubuntu:22.04
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
+# Install system dependencies + Playwright browser deps
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -12,6 +12,25 @@ RUN apt-get update && apt-get install -y \
     docker.io \
     ca-certificates \
     gnupg \
+    # Playwright browser dependencies (for headless Chromium)
+    libglib2.0-0 \
+    libnspr4 \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libxkbcommon0 \
+    libatspi2.0-0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libcairo2 \
+    libpango-1.0-0 \
+    libasound2 \
+    # Virtual display for headed browser mode (extensions, tab capture)
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20.x (LTS)
