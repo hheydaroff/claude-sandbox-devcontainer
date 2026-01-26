@@ -32,3 +32,9 @@ venv/
 
 # Node
 node_modules/
+
+# Generated user config (contains user-specific settings)
+.devcontainer/claude-config/
+
+# npm
+package-lock.json

@@ -1,0 +1,26 @@
+# Git
+.git/
+.gitignore
+
+# Dev files
+test/
+*.md
+!README.md
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local testing
+*.log
+*.tmp
+
+# Claude local settings (don't ship user config)
+.claude/
+
+# Install script (only for curl install)
+install.sh

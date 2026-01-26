@@ -14,9 +14,12 @@
 set -e
 
 # Directories
+# Self-locating: find Dockerfile relative to this script (works with symlinks)
+SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+TEMPLATE_DIR="$SCRIPT_DIR/.devcontainer"
 CONFIG_DIR="$HOME/.config/claude-sandbox"
 CONFIG_FILE="$CONFIG_DIR/config"
-TEMPLATE_DIR="$HOME/.config/devcontainer-templates/claude-sandbox"
 TARGET_DIR=".devcontainer"
 
 # Colors
@@ -138,6 +141,116 @@ EOF
   echo ""
 }
 
+# Extract MCP servers from ~/.claude.json (filtering incompatible ones)
+# Creates claude.json (to be copied to ~/.claude.json in container)
+extract_mcp_servers() {
+  local CONFIG_TARGET="$1"
+  [ -f "$HOME/.claude.json" ] || return 0
+
+  python3 << EOF
+import json
+import os
+
+claude_json_path = os.path.expanduser("~/.claude.json")
+output_path = "$CONFIG_TARGET/claude.json"  # Will be copied to ~/.claude.json in container
+
+# MCPs that won't work inside container (Docker socket MCP, etc.)
+FILTERED_MCPS = {"MCP_DOCKER"}
+
+with open(claude_json_path) as f:
+    data = json.load(f)
+
+# Filter MCP servers
+mcp_servers = data.get("mcpServers", {})
+filtered_mcps = {}
+
+for name, config in mcp_servers.items():
+    if name in FILTERED_MCPS:
+        print(f"  Skipped MCP: {name} (not container-compatible)")
+        continue
+    filtered_mcps[name] = config
+    print(f"  Included MCP: {name}")
+
+# Preserve other fields from claude.json (preferences, etc.) and update mcpServers
+output_data = data.copy()
+output_data["mcpServers"] = filtered_mcps
+
+with open(output_path, "w") as f:
+    json.dump(output_data, f, indent=2)
+
+if filtered_mcps:
+    print(f"  Generated: claude.json ({len(filtered_mcps)} MCP servers)")
+else:
+    print(f"  Generated: claude.json (no container-compatible MCPs)")
+EOF
+}
+
+# Sync Claude configuration to devcontainer
+sync_claude_config() {
+  local CONFIG_TARGET="$TARGET_DIR/claude-config"
+
+  echo -e "${GREEN}Syncing Claude configuration...${NC}"
+  mkdir -p "$CONFIG_TARGET/skills"
+
+  # Copy CLAUDE.md (global instructions)
+  if [ -f "$HOME/.claude/CLAUDE.md" ]; then
+    cp "$HOME/.claude/CLAUDE.md" "$CONFIG_TARGET/"
+    echo "  Copied: CLAUDE.md"
+  fi
+
+  # Copy settings.json (permissions, plugins, env)
+  if [ -f "$HOME/.claude/settings.json" ]; then
+    cp "$HOME/.claude/settings.json" "$CONFIG_TARGET/"
+    echo "  Copied: settings.json"
+  fi
+
+  # Copy custom skills directory (preserve structure)
+  if [ -d "$HOME/.claude/skills" ] && [ "$(ls -A $HOME/.claude/skills 2>/dev/null)" ]; then
+    cp -R "$HOME/.claude/skills/"* "$CONFIG_TARGET/skills/" 2>/dev/null || true
+    local skill_count=$(find "$CONFIG_TARGET/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+    echo "  Copied: skills/ ($skill_count custom skills)"
+  fi
+
+  # Extract and filter MCP servers (creates claude.json)
+  extract_mcp_servers "$CONFIG_TARGET"
+
+  # Create merge-settings.py for Bedrock (merges env settings while preserving host config)
+  if [ "$CLAUDE_PROVIDER" = "bedrock" ]; then
+    cat > "$CONFIG_TARGET/merge-settings.py" << 'MERGE_EOF'
+#!/usr/bin/env python3
+import json
+import os
+
+settings_path = os.path.expanduser("~/.claude/settings.json")
+bedrock_path = "/workspace/.devcontainer/claude-settings.json"
+
+# Load existing settings (from host sync) or empty
+if os.path.exists(settings_path):
+    with open(settings_path) as f:
+        settings = json.load(f)
+else:
+    settings = {}
+
+# Load Bedrock settings
+if os.path.exists(bedrock_path):
+    with open(bedrock_path) as f:
+        bedrock = json.load(f)
+    # Merge env (Bedrock env takes precedence)
+    settings["env"] = {**settings.get("env", {}), **bedrock.get("env", {})}
+
+# Write merged settings
+os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+with open(settings_path, "w") as f:
+    json.dump(settings, f, indent=2)
+
+print("  Merged Bedrock settings into ~/.claude/settings.json")
+MERGE_EOF
+    echo "  Created: merge-settings.py"
+  fi
+
+  echo ""
+}
+
 # Generate devcontainer.json
 generate_devcontainer() {
   local mounts_json=""
@@ -160,20 +273,31 @@ generate_devcontainer() {
     \"source=$mount_path,target=/mnt/$mount_name,type=bind\""
   done
 
+  # Add claude-config mount (synced host configuration)
+  mounts_json="$mounts_json,
+    \"source=\${localWorkspaceFolder}/.devcontainer/claude-config,target=/home/developer/.claude-sync,type=bind,readonly\""
+
+  # Config sync command (runs first in postCreateCommand)
+  # Copies: CLAUDE.md, settings.json, skills/* to ~/.claude/
+  # Copies: claude.json to ~/.claude.json (MCP servers config)
+  local config_sync_cmd="if [ -d ~/.claude-sync ]; then mkdir -p ~/.claude/skills && cp -f ~/.claude-sync/CLAUDE.md ~/.claude/ 2>/dev/null || true && cp -f ~/.claude-sync/settings.json ~/.claude/ 2>/dev/null || true && cp -R ~/.claude-sync/skills/* ~/.claude/skills/ 2>/dev/null || true && cp -f ~/.claude-sync/claude.json ~/.claude.json 2>/dev/null || true && echo 'Config synced from host'; fi && "
+
   # Environment variables and post-create command based on provider
   case "$CLAUDE_PROVIDER" in
     subscription)
       env_json=""
-      post_create_cmd="mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Run: claude login' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
+      post_create_cmd="${config_sync_cmd}mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Config synced: CLAUDE.md, settings, skills' && echo '  Run: claude login' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
       ;;
     api-key)
       env_json=""
-      post_create_cmd="mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Run: export ANTHROPIC_API_KEY=your-key' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
+      post_create_cmd="${config_sync_cmd}mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Config synced: CLAUDE.md, settings, skills' && echo '  Run: export ANTHROPIC_API_KEY=your-key' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
       ;;
     bedrock)
       env_json="\"AWS_DEFAULT_REGION\": \"$AWS_REGION\",
     \"AWS_REGION\": \"$AWS_REGION\""
-      post_create_cmd="mkdir -p ~/.claude && cp \$PWD/.devcontainer/claude-settings.json ~/.claude/settings.json && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Run: export AWS_ACCESS_KEY_ID=... && export AWS_SECRET_ACCESS_KEY=...' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
+      # For Bedrock: run merge script to combine env settings into synced settings (preserves permissions, plugins)
+      local merge_settings_cmd="python3 ~/.claude-sync/merge-settings.py && "
+      post_create_cmd="${config_sync_cmd}mkdir -p ~/.claude && ${merge_settings_cmd}curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Config synced: CLAUDE.md, settings, skills' && echo '  Run: export AWS_ACCESS_KEY_ID=... && export AWS_SECRET_ACCESS_KEY=...' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
       ;;
   esac
 
@@ -327,8 +451,10 @@ main() {
   # Check if Dockerfile template exists
   if [ ! -f "$TEMPLATE_DIR/Dockerfile" ]; then
     echo -e "${RED}Error: Dockerfile template not found at $TEMPLATE_DIR${NC}"
-    echo "Please run the installer first:"
-    echo "  curl -fsSL https://raw.githubusercontent.com/hheydaroff/claude-sandbox-devcontainer/main/install.sh | bash"
+    echo "This usually means the installation is incomplete."
+    echo "Please clone the repo and run install.sh:"
+    echo "  git clone https://github.com/hheydaroff/claude-sandbox-devcontainer.git"
+    echo "  cd claude-sandbox-devcontainer && ./install.sh"
     exit 1
   fi
 
@@ -342,6 +468,9 @@ main() {
   # Create .devcontainer directory
   echo -e "${GREEN}Setting up Claude Code sandbox...${NC}"
   mkdir -p "$TARGET_DIR"
+
+  # Sync Claude configuration from host
+  sync_claude_config
 
   # Copy Dockerfile
   cp "$TEMPLATE_DIR/Dockerfile" "$TARGET_DIR/Dockerfile"
@@ -359,6 +488,7 @@ main() {
   echo "Files created:"
   echo "  .devcontainer/devcontainer.json"
   echo "  .devcontainer/Dockerfile"
+  echo "  .devcontainer/claude-config/ (synced from host)"
   if [ "$CLAUDE_PROVIDER" = "bedrock" ]; then
     echo "  .devcontainer/claude-settings.json"
   fi
@@ -392,11 +522,20 @@ main() {
   # Open in VS Code if requested
   if [ "$OPEN_VSCODE" = true ]; then
     echo ""
-    echo -e "${GREEN}Opening in VS Code...${NC}"
-    if command -v code &> /dev/null; then
+    echo -e "${GREEN}Opening in VS Code DevContainer...${NC}"
+
+    # Try devcontainer CLI first (best experience)
+    if command -v devcontainer &> /dev/null; then
+      echo "  Using devcontainer CLI for direct container launch..."
+      devcontainer open "$(pwd)"
+    elif command -v code &> /dev/null; then
+      # Fall back to VS Code with prompt
       code .
+      echo ""
+      echo -e "${YELLOW}Tip: Press Cmd+Shift+P and select 'Dev Containers: Reopen in Container'${NC}"
     else
       echo -e "${YELLOW}VS Code 'code' command not found in PATH${NC}"
+      echo "Install it from VS Code: Cmd+Shift+P → 'Shell Command: Install code command'"
     fi
   fi
 }

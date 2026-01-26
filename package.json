@@ -1,0 +1,41 @@
+{
+  "name": "claude-sandbox",
+  "version": "1.0.0",
+  "description": "Initialize Claude Code DevContainer sandbox in any directory with auto-synced configuration",
+  "bin": {
+    "claude-sandbox": "./claude-sandbox"
+  },
+  "scripts": {},
+  "keywords": [
+    "claude",
+    "claude-code",
+    "devcontainer",
+    "sandbox",
+    "anthropic",
+    "bedrock",
+    "ai",
+    "vscode"
+  ],
+  "author": "Hidayat Heydarov <hidayat.heydarov@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hheydaroff/claude-sandbox-devcontainer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hheydaroff/claude-sandbox-devcontainer/issues"
+  },
+  "homepage": "https://github.com/hheydaroff/claude-sandbox-devcontainer#readme",
+  "files": [
+    "claude-sandbox",
+    ".devcontainer/Dockerfile"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "preferGlobal": true
+}

@@ -5,6 +5,7 @@ A ready-to-use VS Code DevContainer for running [Claude Code](https://claude.ai/
 ## Features
 
 - **Isolated execution** — Claude runs inside a container, can't access your host filesystem
+- **Config sync** — Automatically syncs your CLAUDE.md, settings, skills, and MCPs from host
 - **Multiple auth methods** — Supports Claude subscription, Anthropic API key, or AWS Bedrock
 - **Docker-in-Docker** — Claude can run Docker commands (auto-detected)
 - **GitHub CLI included** — Easy Git authentication with `gh auth login`
@@ -15,14 +16,17 @@ A ready-to-use VS Code DevContainer for running [Claude Code](https://claude.ai/
 ### 1. Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hheydaroff/claude-sandbox-devcontainer/main/install.sh | bash
+git clone https://github.com/hheydaroff/claude-sandbox-devcontainer.git ~/claude-sandbox
+cd ~/claude-sandbox
+./install.sh
 ```
 
-The installer will ask you:
-- **Authentication method**: Claude subscription, Anthropic API key, or AWS Bedrock
-- **AWS region** (if using Bedrock)
-
-Your choices are saved to `~/.config/claude-sandbox/config` for future use.
+Or with npm:
+```bash
+git clone https://github.com/hheydaroff/claude-sandbox-devcontainer.git ~/claude-sandbox
+cd ~/claude-sandbox
+npm link
+```
 
 ### 2. Initialize a project
 
@@ -30,6 +34,12 @@ Your choices are saved to `~/.config/claude-sandbox/config` for future use.
 cd /path/to/your/project
 claude-sandbox
 ```
+
+First run will prompt for:
+- **Authentication method**: Claude subscription, Anthropic API key, or AWS Bedrock
+- **AWS region** (if using Bedrock)
+
+Your choices are saved to `~/.config/claude-sandbox/config` for future use.
 
 ### 3. Open in VS Code
 
@@ -59,6 +69,14 @@ export AWS_ACCESS_KEY_ID="your-key"
 export AWS_SECRET_ACCESS_KEY="your-secret"
 clauded
 ```
+
+## Updating
+
+```bash
+cd ~/claude-sandbox && git pull
+```
+
+That's it — the symlink means updates take effect immediately.
 
 ## CLI Options
 
@@ -116,8 +134,26 @@ The `claude-sandbox` command creates a `.devcontainer/` folder with:
 .devcontainer/
 ├── devcontainer.json      # VS Code container configuration
 ├── Dockerfile             # Ubuntu 22.04 + Node.js 20 + Docker CLI + GitHub CLI
-└── claude-settings.json   # Claude settings (Bedrock only)
+├── claude-config/         # Synced from host ~/.claude/
+│   ├── CLAUDE.md          # Global instructions
+│   ├── settings.json      # Permissions, plugins, env
+│   ├── skills/            # Custom skills
+│   └── claude.json        # MCP servers (copied to ~/.claude.json)
+└── claude-settings.json   # Bedrock env settings (Bedrock only)
 ```
+
+### Config Sync
+
+The tool automatically copies your Claude configuration from the host:
+
+| Host Location | Container Location | Purpose |
+|---------------|-------------------|---------|
+| `~/.claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Global instructions |
+| `~/.claude/settings.json` | `~/.claude/settings.json` | Permissions, plugins |
+| `~/.claude/skills/*` | `~/.claude/skills/*` | Custom skills |
+| `~/.claude.json` | `~/.claude.json` | MCP servers (filtered) |
+
+**Note:** MCP servers that won't work in containers (like MCP_DOCKER) are automatically filtered out.
 
 ## Git Authentication
 
@@ -150,7 +186,7 @@ The template does **not** mount SSH keys for security reasons — private keys c
 
 ## MCP Integrations
 
-To add MCP servers (Atlassian, GitHub, etc.), run inside the container:
+MCP servers from your host `~/.claude.json` are automatically synced. To add more inside the container:
 
 ```bash
 # Atlassian (Jira/Confluence)
@@ -197,7 +233,13 @@ claude mcp list
 
 ## Troubleshooting
 
-### "claude: not found"
+### "claude-sandbox: not found"
+The PATH wasn't set correctly. Add to your `~/.zshrc` or `~/.bashrc`:
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+### "claude: not found" (inside container)
 The PATH wasn't set correctly. Run:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -222,6 +264,13 @@ export ANTHROPIC_API_KEY="your-key"
 ```bash
 export AWS_ACCESS_KEY_ID="..."
 export AWS_SECRET_ACCESS_KEY="..."
+```
+
+## Uninstall
+
+```bash
+rm ~/.local/bin/claude-sandbox
+rm -rf ~/claude-sandbox  # or wherever you cloned it
 ```
 
 ## License
