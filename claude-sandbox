@@ -279,7 +279,7 @@ EOF
 create_gitignore() {
   local gitignore_file=".gitignore"
   local entries=(
-    ".devcontainer/"
+    ".devcontainer/claude-config/"
     ".claude/"
     ".vscode/"
     ".env"
