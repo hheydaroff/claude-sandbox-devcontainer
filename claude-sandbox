@@ -141,50 +141,6 @@ EOF
   echo ""
 }
 
-# Extract MCP servers from ~/.claude.json (filtering incompatible ones)
-# Creates claude.json (to be copied to ~/.claude.json in container)
-extract_mcp_servers() {
-  local CONFIG_TARGET="$1"
-  [ -f "$HOME/.claude.json" ] || return 0
-
-  python3 << EOF
-import json
-import os
-
-claude_json_path = os.path.expanduser("~/.claude.json")
-output_path = "$CONFIG_TARGET/claude.json"  # Will be copied to ~/.claude.json in container
-
-# MCPs that won't work inside container (Docker socket MCP, etc.)
-FILTERED_MCPS = {"MCP_DOCKER"}
-
-with open(claude_json_path) as f:
-    data = json.load(f)
-
-# Filter MCP servers
-mcp_servers = data.get("mcpServers", {})
-filtered_mcps = {}
-
-for name, config in mcp_servers.items():
-    if name in FILTERED_MCPS:
-        print(f"  Skipped MCP: {name} (not container-compatible)")
-        continue
-    filtered_mcps[name] = config
-    print(f"  Included MCP: {name}")
-
-# Preserve other fields from claude.json (preferences, etc.) and update mcpServers
-output_data = data.copy()
-output_data["mcpServers"] = filtered_mcps
-
-with open(output_path, "w") as f:
-    json.dump(output_data, f, indent=2)
-
-if filtered_mcps:
-    print(f"  Generated: claude.json ({len(filtered_mcps)} MCP servers)")
-else:
-    print(f"  Generated: claude.json (no container-compatible MCPs)")
-EOF
-}
-
 # Sync Claude configuration to devcontainer
 sync_claude_config() {
   local CONFIG_TARGET="$TARGET_DIR/claude-config"
@@ -198,12 +154,6 @@ sync_claude_config() {
     echo "  Copied: CLAUDE.md"
   fi
 
-  # Copy settings.json (permissions, plugins, env)
-  if [ -f "$HOME/.claude/settings.json" ]; then
-    cp "$HOME/.claude/settings.json" "$CONFIG_TARGET/"
-    echo "  Copied: settings.json"
-  fi
-
   # Copy custom skills directory (preserve structure)
   if [ -d "$HOME/.claude/skills" ] && [ "$(ls -A $HOME/.claude/skills 2>/dev/null)" ]; then
     cp -R "$HOME/.claude/skills/"* "$CONFIG_TARGET/skills/" 2>/dev/null || true
@@ -211,41 +161,30 @@ sync_claude_config() {
     echo "  Copied: skills/ ($skill_count custom skills)"
   fi
 
-  # Extract and filter MCP servers (creates claude.json)
-  extract_mcp_servers "$CONFIG_TARGET"
-
-  # Create merge-settings.py for Bedrock (merges env settings while preserving host config)
+  # Create settings.local.json for Bedrock (env settings)
   if [ "$CLAUDE_PROVIDER" = "bedrock" ]; then
-    cat > "$CONFIG_TARGET/merge-settings.py" << 'MERGE_EOF'
-#!/usr/bin/env python3
-import json
-import os
+    # Determine model prefix based on region
+    local model_prefix=""
+    case "$AWS_REGION" in
+      us-east-1|us-west-2) model_prefix="us" ;;
+      eu-*) model_prefix="eu" ;;
+      ap-*) model_prefix="ap" ;;
+      *) model_prefix="us" ;;
+    esac
 
-settings_path = os.path.expanduser("~/.claude/settings.json")
-bedrock_path = "/workspace/.devcontainer/claude-settings.json"
-
-# Load existing settings (from host sync) or empty
-if os.path.exists(settings_path):
-    with open(settings_path) as f:
-        settings = json.load(f)
-else:
-    settings = {}
-
-# Load Bedrock settings
-if os.path.exists(bedrock_path):
-    with open(bedrock_path) as f:
-        bedrock = json.load(f)
-    # Merge env (Bedrock env takes precedence)
-    settings["env"] = {**settings.get("env", {}), **bedrock.get("env", {})}
-
-# Write merged settings
-os.makedirs(os.path.dirname(settings_path), exist_ok=True)
-with open(settings_path, "w") as f:
-    json.dump(settings, f, indent=2)
-
-print("  Merged Bedrock settings into ~/.claude/settings.json")
-MERGE_EOF
-    echo "  Created: merge-settings.py"
+    cat > "$CONFIG_TARGET/settings.local.json" << EOF
+{
+  "env": {
+    "CLAUDE_CODE_USE_BEDROCK": "1",
+    "ANTHROPIC_MODEL": "${model_prefix}.anthropic.claude-opus-4-5-20251101-v1:0",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "${model_prefix}.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${model_prefix}.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "AWS_REGION": "$AWS_REGION",
+    "AWS_DEFAULT_REGION": "$AWS_REGION"
+  }
+}
+EOF
+    echo "  Created: settings.local.json (Bedrock config)"
   fi
 
   echo ""
@@ -278,26 +217,25 @@ generate_devcontainer() {
     \"source=\${localWorkspaceFolder}/.devcontainer/claude-config,target=/home/developer/.claude-sync,type=bind,readonly\""
 
   # Config sync command (runs first in postCreateCommand)
-  # Copies: CLAUDE.md, settings.json, skills/* to ~/.claude/
-  # Copies: claude.json to ~/.claude.json (MCP servers config)
-  local config_sync_cmd="if [ -d ~/.claude-sync ]; then mkdir -p ~/.claude/skills && cp -f ~/.claude-sync/CLAUDE.md ~/.claude/ 2>/dev/null || true && cp -f ~/.claude-sync/settings.json ~/.claude/ 2>/dev/null || true && cp -R ~/.claude-sync/skills/* ~/.claude/skills/ 2>/dev/null || true && cp -f ~/.claude-sync/claude.json ~/.claude.json 2>/dev/null || true && echo 'Config synced from host'; fi && "
+  # Copies: CLAUDE.md, skills/* to ~/.claude/
+  local config_sync_cmd="if [ -d ~/.claude-sync ]; then mkdir -p ~/.claude/skills && cp -f ~/.claude-sync/CLAUDE.md ~/.claude/ 2>/dev/null || true && cp -R ~/.claude-sync/skills/* ~/.claude/skills/ 2>/dev/null || true && echo 'Config synced from host'; fi && "
 
   # Environment variables and post-create command based on provider
   case "$CLAUDE_PROVIDER" in
     subscription)
       env_json=""
-      post_create_cmd="${config_sync_cmd}mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Config synced: CLAUDE.md, settings, skills' && echo '  Run: claude login' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
+      post_create_cmd="${config_sync_cmd}mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Config synced: CLAUDE.md, skills' && echo '  Run: claude login' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
       ;;
     api-key)
       env_json=""
-      post_create_cmd="${config_sync_cmd}mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Config synced: CLAUDE.md, settings, skills' && echo '  Run: export ANTHROPIC_API_KEY=your-key' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
+      post_create_cmd="${config_sync_cmd}mkdir -p ~/.claude && curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Config synced: CLAUDE.md, skills' && echo '  Run: export ANTHROPIC_API_KEY=your-key' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
       ;;
     bedrock)
       env_json="\"AWS_DEFAULT_REGION\": \"$AWS_REGION\",
     \"AWS_REGION\": \"$AWS_REGION\""
-      # For Bedrock: run merge script to combine env settings into synced settings (preserves permissions, plugins)
-      local merge_settings_cmd="python3 ~/.claude-sync/merge-settings.py && "
-      post_create_cmd="${config_sync_cmd}mkdir -p ~/.claude && ${merge_settings_cmd}curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Config synced: CLAUDE.md, settings, skills' && echo '  Run: export AWS_ACCESS_KEY_ID=... && export AWS_SECRET_ACCESS_KEY=...' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
+      # For Bedrock: copy settings.local.json for model configuration
+      local bedrock_settings_cmd="cp -f ~/.claude-sync/settings.local.json ~/.claude/settings.local.json 2>/dev/null || true && "
+      post_create_cmd="${config_sync_cmd}mkdir -p ~/.claude && ${bedrock_settings_cmd}curl -fsSL https://claude.ai/install.sh | bash && export PATH=\\\"\$HOME/.local/bin:\$PATH\\\" && echo 'export PATH=\\\"\$HOME/.local/bin:\$PATH\\\"' >> ~/.bashrc && echo 'alias clauded=\\\"claude --dangerously-skip-permissions\\\"' >> ~/.bashrc && echo '' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' && echo '  Claude Code Sandbox ready!' && echo '  Config synced: CLAUDE.md, skills' && echo '  Run: export AWS_ACCESS_KEY_ID=... && export AWS_SECRET_ACCESS_KEY=...' && echo '  Then: clauded' && echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'"
       ;;
   esac
 
@@ -337,31 +275,37 @@ generate_devcontainer() {
 EOF
 }
 
-# Generate claude-settings.json (Bedrock only)
-generate_claude_settings() {
-  if [ "$CLAUDE_PROVIDER" = "bedrock" ]; then
-    # Determine model prefix based on region
-    local model_prefix=""
-    case "$AWS_REGION" in
-      us-east-1|us-west-2) model_prefix="us" ;;
-      eu-*) model_prefix="eu" ;;
-      ap-*) model_prefix="ap" ;;
-      *) model_prefix="us" ;;
-    esac
+# Create or update .gitignore in target project
+create_gitignore() {
+  local gitignore_file=".gitignore"
+  local entries=(
+    ".devcontainer/"
+    ".claude/"
+    ".vscode/"
+    ".env"
+    ".env.*"
+  )
 
-    cat > "$TARGET_DIR/claude-settings.json" << EOF
-{
-  "env": {
-    "CLAUDE_CODE_USE_BEDROCK": "1",
-    "ANTHROPIC_MODEL": "${model_prefix}.anthropic.claude-opus-4-5-20251101-v1:0",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "${model_prefix}.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${model_prefix}.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "AWS_REGION": "$AWS_REGION",
-    "AWS_DEFAULT_REGION": "$AWS_REGION"
-  }
-}
-EOF
+  echo -e "${GREEN}Updating .gitignore...${NC}"
+
+  # Create file if it doesn't exist
+  touch "$gitignore_file"
+
+  # Add header if file is empty or doesn't have our marker
+  if ! grep -q "# Claude Sandbox" "$gitignore_file" 2>/dev/null; then
+    echo "" >> "$gitignore_file"
+    echo "# Claude Sandbox" >> "$gitignore_file"
   fi
+
+  # Add each entry if not already present
+  for entry in "${entries[@]}"; do
+    if ! grep -qxF "$entry" "$gitignore_file" 2>/dev/null; then
+      echo "$entry" >> "$gitignore_file"
+      echo "  Added: $entry"
+    fi
+  done
+
+  echo ""
 }
 
 # Show help
@@ -478,8 +422,8 @@ main() {
   # Generate devcontainer.json
   generate_devcontainer
 
-  # Generate claude-settings.json (if Bedrock)
-  generate_claude_settings
+  # Create/update .gitignore
+  create_gitignore
 
   # Success message
   echo ""
@@ -488,10 +432,12 @@ main() {
   echo "Files created:"
   echo "  .devcontainer/devcontainer.json"
   echo "  .devcontainer/Dockerfile"
-  echo "  .devcontainer/claude-config/ (synced from host)"
   if [ "$CLAUDE_PROVIDER" = "bedrock" ]; then
-    echo "  .devcontainer/claude-settings.json"
+    echo "  .devcontainer/claude-config/ (CLAUDE.md, skills, settings.local.json)"
+  else
+    echo "  .devcontainer/claude-config/ (CLAUDE.md, skills)"
   fi
+  echo "  .gitignore (updated)"
   echo ""
   echo -e "Configuration:"
   echo -e "  Provider: ${CYAN}$CLAUDE_PROVIDER${NC}"
