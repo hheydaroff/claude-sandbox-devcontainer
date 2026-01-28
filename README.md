@@ -5,7 +5,7 @@ A ready-to-use VS Code DevContainer for running [Claude Code](https://claude.ai/
 ## Features
 
 - **Isolated execution** — Claude runs inside a container, can't access your host filesystem
-- **Config sync** — Automatically syncs your CLAUDE.md, settings, skills, and MCPs from host
+- **Config sync** — Automatically syncs your CLAUDE.md and custom skills from host
 - **Multiple auth methods** — Supports Claude subscription, Anthropic API key, or AWS Bedrock
 - **Docker-in-Docker** — Claude can run Docker commands (auto-detected)
 - **GitHub CLI included** — Easy Git authentication with `gh auth login`
@@ -134,12 +134,10 @@ The `claude-sandbox` command creates a `.devcontainer/` folder with:
 .devcontainer/
 ├── devcontainer.json      # VS Code container configuration
 ├── Dockerfile             # Ubuntu 22.04 + Node.js 20 + Docker CLI + GitHub CLI
-├── claude-config/         # Synced from host ~/.claude/
-│   ├── CLAUDE.md          # Global instructions
-│   ├── settings.json      # Permissions, plugins, env
-│   ├── skills/            # Custom skills
-│   └── claude.json        # MCP servers (copied to ~/.claude.json)
-└── claude-settings.json   # Bedrock env settings (Bedrock only)
+└── claude-config/         # Synced from host ~/.claude/
+    ├── CLAUDE.md          # Global instructions
+    ├── skills/            # Custom skills
+    └── settings.local.json # Bedrock model config (Bedrock only)
 ```
 
 ### Config Sync
@@ -149,11 +147,9 @@ The tool automatically copies your Claude configuration from the host:
 | Host Location | Container Location | Purpose |
 |---------------|-------------------|---------|
 | `~/.claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | Global instructions |
-| `~/.claude/settings.json` | `~/.claude/settings.json` | Permissions, plugins |
 | `~/.claude/skills/*` | `~/.claude/skills/*` | Custom skills |
-| `~/.claude.json` | `~/.claude.json` | MCP servers (filtered) |
 
-**Note:** MCP servers that won't work in containers (like MCP_DOCKER) are automatically filtered out.
+**Note:** Settings and MCP servers are not synced to avoid permission/path issues in containers. Configure MCP servers inside the container as needed.
 
 ## Git Authentication
 
@@ -186,7 +182,7 @@ The template does **not** mount SSH keys for security reasons — private keys c
 
 ## MCP Integrations
 
-MCP servers from your host `~/.claude.json` are automatically synced. To add more inside the container:
+MCP servers need to be configured inside the container (host MCP configs are not synced):
 
 ```bash
 # Atlassian (Jira/Confluence)
